@@ -70,12 +70,12 @@ class BackboneBase(nn.Module):
         self.num_channels = num_channels
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self.body(tensor_list.tensors)
+        xs = self.body(tensor_list.tensors) # { "0": [2, 2048, 18, 32]}
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
             m = tensor_list.mask
             assert m is not None
-            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
+            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]  # [2, 18, 32]
             out[name] = NestedTensor(x, mask)
         return out
 
@@ -98,7 +98,7 @@ class Joiner(nn.Sequential):
         super().__init__(backbone, position_embedding)
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self[0](tensor_list)
+        xs = self[0](tensor_list)   # {'0': NestedTensor} xs['0'].tensors: [2, 2048, 18, 32], xs['0'].mask: [2, 18, 32] [batch_size, h, w]
         out: List[NestedTensor] = []
         pos = []
         for name, x in xs.items():
@@ -106,7 +106,7 @@ class Joiner(nn.Sequential):
             # position encoding
             pos.append(self[1](x).to(x.tensors.dtype))
 
-        return out, pos
+        return out, pos  # [tensors:[2, 2048, 18, 32], mask:[2,18,32]],  [pos: [2, 256, 18, 32]]
 
 
 def build_backbone(args):

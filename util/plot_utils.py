@@ -6,6 +6,10 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+# Enable interactive mode
+# for debug: 
+#   会提示 Backend tkagg is interactive backend. Turning interactive mode on. vscode
+plt.ion()
 
 from pathlib import Path, PurePath
 

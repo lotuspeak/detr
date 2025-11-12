@@ -31,13 +31,13 @@ class DETR(nn.Module):
             aux_loss: True if auxiliary decoding losses (loss at each decoder layer) are to be used.
         """
         super().__init__()
-        self.num_queries = num_queries
+        self.num_queries = num_queries  # 100
         self.transformer = transformer
-        hidden_dim = transformer.d_model
-        self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
+        hidden_dim = transformer.d_model    # 256
+        self.class_embed = nn.Linear(hidden_dim, num_classes + 1)   # num_classes = 91
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)   # num_channels is 2048 for resnet50, hidden_dim is 256
         self.backbone = backbone
         self.aux_loss = aux_loss
 
@@ -58,15 +58,15 @@ class DETR(nn.Module):
         """
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        features, pos = self.backbone(samples)
+        features, pos = self.backbone(samples)  # features[0]: tensors [2,2048,18,32], mask [2, 18, 32]; pos[0]: [2,256,18,32]
 
-        src, mask = features[-1].decompose()
+        src, mask = features[-1].decompose()    # src:[2,2048,18,32],  mask: [2,18,32]
         assert mask is not None
-        hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]
+        hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]  # [num_layers, 2, 100, 256]
 
-        outputs_class = self.class_embed(hs)
-        outputs_coord = self.bbox_embed(hs).sigmoid()
-        out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+        outputs_class = self.class_embed(hs)            # [num_layers, 2, 100, 92]
+        outputs_coord = self.bbox_embed(hs).sigmoid()   # [num_layers, 2, 100, 4]
+        out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}   # [2, 100, 92], [2, 100, 4]
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
         return out
@@ -110,13 +110,13 @@ class SetCriterion(nn.Module):
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
         assert 'pred_logits' in outputs
-        src_logits = outputs['pred_logits']
+        src_logits = outputs['pred_logits'] # [batch_size, num_queries, num_classes + 1]
 
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])   # get the matched target labels  [num_matched_boxes, ]
         target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
-        target_classes[idx] = target_classes_o
+                                    dtype=torch.int64, device=src_logits.device)    # [batch_size, num_queries], fill with num_classes (the no-object class)
+        target_classes[idx] = target_classes_o  # fill the matched ones with their real class
 
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
         losses = {'loss_ce': loss_ce}
@@ -147,17 +147,17 @@ class SetCriterion(nn.Module):
         """
         assert 'pred_boxes' in outputs
         idx = self._get_src_permutation_idx(indices)
-        src_boxes = outputs['pred_boxes'][idx]
-        target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        src_boxes = outputs['pred_boxes'][idx]  # [num_matched_boxes, 4]
+        target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)  # [num_matched_boxes, 4]
 
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')    # [num_matched_boxes, 4]
 
         losses = {}
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
 
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
             box_ops.box_cxcywh_to_xyxy(src_boxes),
-            box_ops.box_cxcywh_to_xyxy(target_boxes)))
+            box_ops.box_cxcywh_to_xyxy(target_boxes)))  # [num_matched_boxes, ]
         losses['loss_giou'] = loss_giou.sum() / num_boxes
         return losses
 
@@ -191,7 +191,7 @@ class SetCriterion(nn.Module):
         return losses
 
     def _get_src_permutation_idx(self, indices):
-        # permute predictions following indices
+        # permute predictions following indices # 重新排列
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
         src_idx = torch.cat([src for (src, _) in indices])
         return batch_idx, src_idx
@@ -222,7 +222,8 @@ class SetCriterion(nn.Module):
         outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
 
         # Retrieve the matching between the outputs of the last layer and the targets
-        indices = self.matcher(outputs_without_aux, targets)
+        # list of size batch_size, containing tuples of (index_i, index_j), # index_i is the indices of the selected predictions (in order), 
+        indices = self.matcher(outputs_without_aux, targets)  # index_j is the indices of the corresponding selected targets (in order)
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         num_boxes = sum(len(t["labels"]) for t in targets)
@@ -331,8 +332,8 @@ def build(args):
     if args.masks:
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))
     matcher = build_matcher(args)
-    weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef}
-    weight_dict['loss_giou'] = args.giou_loss_coef
+    weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef}  # 5
+    weight_dict['loss_giou'] = args.giou_loss_coef  # 2
     if args.masks:
         weight_dict["loss_mask"] = args.mask_loss_coef
         weight_dict["loss_dice"] = args.dice_loss_coef
