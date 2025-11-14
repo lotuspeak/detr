@@ -16,7 +16,7 @@ class PositionEmbeddingSine(nn.Module):
     """
     def __init__(self, num_pos_feats=64, temperature=10000, normalize=False, scale=None):
         super().__init__()
-        self.num_pos_feats = num_pos_feats  # 128
+        self.num_pos_feats = num_pos_feats  # 128; position features for each dimension (x and y)
         self.temperature = temperature  # 10000
         self.normalize = normalize
         if scale is not None and normalize is False:
